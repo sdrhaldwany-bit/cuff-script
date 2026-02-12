@@ -1,0 +1,231 @@
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+local RunService = game:GetService("RunService")
+local Mouse = LP:GetMouse()
+
+local RemoteEvents = {}
+local CuffedTargets = {}
+local FrozenPlayers = {}
+local CuffingActive = false
+
+-- تحديث RemoteEvents
+local function UpdateRemoteEvents()
+    RemoteEvents = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        for _, tool in pairs(plr.Backpack:GetChildren()) do
+            local re = tool:FindFirstChildWhichIsA("RemoteEvent")
+            if re then table.insert(RemoteEvents,re) end
+        end
+        if plr.Character then
+            for _, tool in pairs(plr.Character:GetChildren()) do
+                local re = tool:FindFirstChildWhichIsA("RemoteEvent")
+                if re then table.insert(RemoteEvents,re) end
+            end
+        end
+    end
+end
+
+-- علامة مرئية فوق اللاعب
+local function ShowStatus(plr, status)
+    if not plr.Character then return end
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local tag = hrp:FindFirstChild("StatusTag")
+    if not tag then
+        tag = Instance.new("BillboardGui")
+        tag.Name = "StatusTag"
+        tag.Size = UDim2.new(0,100,0,50)
+        tag.StudsOffset = Vector3.new(0,3,0)
+        tag.AlwaysOnTop = true
+        tag.Parent = hrp
+
+        local label = Instance.new("TextLabel", tag)
+        label.Size = UDim2.new(1,0,1,0)
+        label.BackgroundTransparency = 1
+        label.TextScaled = true
+        label.TextStrokeTransparency = 0
+        label.TextColor3 = Color3.fromRGB(255,255,255)
+        label.Name = "Label"
+    end
+
+    local label = tag:FindFirstChild("Label")
+    if label then
+        if status == "Cuffed" then
+            label.Text = "🔒 Cuffed"
+            label.TextColor3 = Color3.fromRGB(255,0,0)
+        elseif status == "Frozen" then
+            label.Text = "❄️ Frozen"
+            label.TextColor3 = Color3.fromRGB(0,200,255)
+        else
+            label.Text = ""
+        end
+    end
+end
+
+-- كبش / فك لاعب
+local function ToggleCuff(target)
+    if not target or not target.Character then return end
+    local hrp = target.Character:FindFirstChild("HumanoidRootPart") or target.Character:FindFirstChild("Torso")
+    if not hrp then return end
+    UpdateRemoteEvents()
+    local idx = table.find(CuffedTargets, target)
+    if idx then
+        for _, re in pairs(RemoteEvents) do pcall(function() re:FireServer("UnCuff") end) end
+        table.remove(CuffedTargets, idx)
+        ShowStatus(target, nil)
+    else
+        for _, re in pairs(RemoteEvents) do pcall(function() re:FireServer("Cuff", hrp) end) end
+        table.insert(CuffedTargets, target)
+        ShowStatus(target, "Cuffed")
+    end
+end
+
+-- كبش جميع اللاعبين
+local function CuffAllPlayers()
+    UpdateRemoteEvents()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LP and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Torso")
+            if hrp then
+                for _, re in pairs(RemoteEvents) do pcall(function() re:FireServer("Cuff", hrp) end) end
+                if not table.find(CuffedTargets, plr) then
+                    table.insert(CuffedTargets, plr)
+                    ShowStatus(plr, "Cuffed")
+                end
+            end
+        end
+    end
+end
+
+-- فك جميع اللاعبين
+local function UncuffAllPlayers()
+    UpdateRemoteEvents()
+    for _, re in pairs(RemoteEvents) do pcall(function() re:FireServer("UnCuff") end) end
+    for _, plr in pairs(CuffedTargets) do
+        ShowStatus(plr, nil)
+    end
+    CuffedTargets = {}
+end
+
+-- تجميد لاعب
+local function FreezePlayer(plr)
+    if not plr.Character then return end
+    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    if hum and hrp then
+        FrozenPlayers[plr] = {WalkSpeed = hum.WalkSpeed, JumpPower = hum.JumpPower}
+        hum.WalkSpeed = 0
+        hum.JumpPower = 0
+        hrp.Anchored = true
+        ShowStatus(plr, "Frozen")
+    end
+end
+
+-- فك التجميد
+local function UnFreezePlayer(plr)
+    if not plr.Character then return end
+    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    if hum and hrp and FrozenPlayers[plr] then
+        hum.WalkSpeed = FrozenPlayers[plr].WalkSpeed or 16
+        hum.JumpPower = FrozenPlayers[plr].JumpPower or 50
+        hrp.Anchored = false
+        FrozenPlayers[plr] = nil
+        ShowStatus(plr, nil)
+    end
+end
+
+local function FreezeAllPlayers()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LP then FreezePlayer(plr) end
+    end
+end
+
+local function UnFreezeAllPlayers()
+    for plr,_ in pairs(FrozenPlayers) do
+        UnFreezePlayer(plr)
+    end
+end
+
+-- GUI
+local Gui = Instance.new("ScreenGui", PlayerGui)
+Gui.ResetOnSpawn = false
+
+local Btn = Instance.new("TextButton", Gui)
+Btn.Size = UDim2.fromOffset(120,50)
+Btn.Position = UDim2.new(0,50,0,50)
+Btn.Text = "Cuff: OFF"
+Btn.TextScaled = true
+Btn.BackgroundColor3 = Color3.fromRGB(255,0,0)
+Btn.TextColor3 = Color3.fromRGB(255,255,255)
+
+local CuffAllBtn = Instance.new("TextButton", Gui)
+CuffAllBtn.Size = UDim2.fromOffset(120,40)
+CuffAllBtn.Position = Btn.Position + UDim2.new(0,0,0,60)
+CuffAllBtn.Text = "CUFF ALL"
+CuffAllBtn.TextScaled = true
+CuffAllBtn.BackgroundColor3 = Color3.fromRGB(0,120,255)
+CuffAllBtn.TextColor3 = Color3.fromRGB(255,255,255)
+
+local UncuffAllBtn = Instance.new("TextButton", Gui)
+UncuffAllBtn.Size = UDim2.fromOffset(120,40)
+UncuffAllBtn.Position = Btn.Position + UDim2.new(0,0,0,110)
+UncuffAllBtn.Text = "UNCUFF ALL"
+UncuffAllBtn.TextScaled = true
+UncuffAllBtn.BackgroundColor3 = Color3.fromRGB(120,120,120)
+UncuffAllBtn.TextColor3 = Color3.fromRGB(255,255,255)
+
+local FreezeAllBtn = Instance.new("TextButton", Gui)
+FreezeAllBtn.Size = UDim2.fromOffset(120,40)
+FreezeAllBtn.Position = Btn.Position + UDim2.new(0,0,0,160)
+FreezeAllBtn.Text = "FREEZE ALL"
+FreezeAllBtn.TextScaled = true
+FreezeAllBtn.BackgroundColor3 = Color3.fromRGB(0,200,255)
+FreezeAllBtn.TextColor3 = Color3.fromRGB(255,255,255)
+
+local UnFreezeAllBtn = Instance.new("TextButton", Gui)
+UnFreezeAllBtn.Size = UDim2.fromOffset(120,40)
+UnFreezeAllBtn.Position = Btn.Position + UDim2.new(0,0,0,210)
+UnFreezeAllBtn.Text = "UNFREEZE ALL"
+UnFreezeAllBtn.TextScaled = true
+UnFreezeAllBtn.BackgroundColor3 = Color3.fromRGB(200,200,200)
+UnFreezeAllBtn.TextColor3 = Color3.fromRGB(255,255,255)
+
+-- تفعيل كبش عند الضغط على اللاعب
+Mouse.Button1Down:Connect(function()
+    if not CuffingActive then return end
+    local target = Mouse.Target
+    if not target then return end
+    local char = target:FindFirstAncestorOfClass("Model")
+    local plr = char and Players:GetPlayerFromCharacter(char)
+    if plr and plr ~= LP then
+        ToggleCuff(plr)
+    end
+end)
+
+-- أزرار التحكم
+Btn.MouseButton1Click:Connect(function()
+    CuffingActive = not CuffingActive
+    Btn.Text = CuffingActive and "Cuff: ON" or "Cuff: OFF"
+    Btn.BackgroundColor3 = CuffingActive and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
+end)
+
+CuffAllBtn.MouseButton1Click:Connect(CuffAllPlayers)
+UncuffAllBtn.MouseButton1Click:Connect(UncuffAllPlayers)
+FreezeAllBtn.MouseButton1Click:Connect(FreezeAllPlayers)
+UnFreezeAllBtn.MouseButton1Click:Connect(UnFreezeAllPlayers)
+
+-- تحديث العداد باستمرار (اختياري)
+local CountLabel = Instance.new("TextLabel", Gui)
+CountLabel.Size = UDim2.fromOffset(60,40)
+CountLabel.Position = Btn.Position + UDim2.new(0,130,0,10)
+CountLabel.Text = "0"
+CountLabel.TextScaled = true
+CountLabel.BackgroundTransparency = 0.5
+CountLabel.TextColor3 = Color3.fromRGB(255,255,255)
+
+RunService.RenderStepped:Connect(function()
+    CountLabel.Text = "Cuffed: "..tostring(#CuffedTargets)
+end)
